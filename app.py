@@ -2150,16 +2150,14 @@ class JobbagApplication:
         if not ready_results:
             return
 
-        # IMPORTANT:
-        # Each Jobbag output is A5 LANDSCAPE (210 x 148 mm).
-        # Two A5 LANDSCAPE pages fit perfectly on one A4 PORTRAIT page
-        # when placed one above the other. This preserves the complete
-        # Jobbag image without rotating, cropping, or squeezing it.
-        # Side-by-side A5 LANDSCAPE on A4 would require rotating the
-        # Jobbag, so top/bottom is the correct print-ready arrangement.
-        A4_WIDTH = 595.276
-        A4_HEIGHT = 841.89
-        HALF_HEIGHT = A4_HEIGHT / 2
+        # A4 LANDSCAPE: two Jobbags side-by-side.
+        # Each individual Jobbag is A5 LANDSCAPE (210 x 148 mm).
+        # Because two true A5 landscape pages are wider than A4, each
+        # Jobbag is proportionally scaled to fit one half of the A4 sheet.
+        # Nothing is cropped, stretched, or overlapped.
+        A4_WIDTH = 841.89
+        A4_HEIGHT = 595.276
+        HALF_WIDTH = A4_WIDTH / 2
 
         output_path = os.path.join(
             self.output_folder,
@@ -2180,36 +2178,56 @@ class JobbagApplication:
             for position, result in enumerate(pair):
 
                 pdf_path = self._windows_path(result["output"])
+                source_doc = None
 
                 try:
                     source_doc = pymupdf.open(pdf_path)
 
                     if len(source_doc) > 0:
-                        # Full-width A5 landscape area.
-                        # First Jobbag = top half; second Jobbag = bottom half.
-                        target_rect = pymupdf.Rect(
-                            0,
-                            position * HALF_HEIGHT,
-                            A4_WIDTH,
-                            (position + 1) * HALF_HEIGHT
+                        source_page = source_doc[0]
+                        source_rect = source_page.rect
+
+                        # Keep the original Jobbag proportions.
+                        scale = min(
+                            HALF_WIDTH / source_rect.width,
+                            A4_HEIGHT / source_rect.height
                         )
 
-                        # Fill the exact A5-sized area. No centering blank space,
-                        # no cropping and no rotation.
+                        draw_width = source_rect.width * scale
+                        draw_height = source_rect.height * scale
+
+                        # Align each Jobbag to the LEFT of its half so that
+                        # the two print areas meet at the centre cut line.
+                        x0 = position * HALF_WIDTH
+                        y0 = (A4_HEIGHT - draw_height) / 2
+
+                        target_rect = pymupdf.Rect(
+                            x0,
+                            y0,
+                            x0 + draw_width,
+                            y0 + draw_height
+                        )
+
                         a4_page.show_pdf_page(
                             target_rect,
                             source_doc,
                             0,
-                            keep_proportion=False
+                            keep_proportion=True
                         )
-
-                    source_doc.close()
 
                 except Exception:
                     continue
 
+                finally:
+                    if source_doc is not None:
+                        source_doc.close()
+
         if len(combined) > 0:
-            combined.save(output_path, garbage=4, deflate=True)
+            combined.save(
+                output_path,
+                garbage=4,
+                deflate=True
+            )
             self.a4_2up_path = output_path
 
         combined.close()
